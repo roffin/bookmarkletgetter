@@ -1,0 +1,46 @@
+{
+  "name": "BookmarkletGetter",
+  "version": "1.1.1",
+  "manifest_version": 2,
+  "description": "Get/sync/update bookmarklets from a server!",
+  "icons": {
+    "128": "icons/icon.png"
+  },
+  "background": {
+    "scripts": [
+      "src/bg/background.js"
+    ],
+    "persistent": true
+  },
+  "browser_action": {
+
+  },
+  "options_page": "src/options_custom/index.html",
+  "permissions": [
+    "bookmarks",
+    "contextMenus",
+    "storage",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "css": [
+        "src/inject/inject.css"
+      ]
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/inject/inject.js"
+      ]
+    }
+  ]
+}
