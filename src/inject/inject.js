@@ -7,7 +7,7 @@ chrome.storage.local.get('syncServer', function (result) {
     
     injectScripts.textContent = '';
     for (var i=0; i<syncServers.length; i++) {
-        if (syncServers[i].injectScript)
+        if (syncServers[i].injectScript && syncServers[i].allowJavaScriptInjection)
             injectScripts.textContent += syncServers[i].injectScript + '\r\n';
     }
 
