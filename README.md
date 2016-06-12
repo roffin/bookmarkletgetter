@@ -36,11 +36,14 @@ This structure will then be downloaded to your browser when the extension perfor
 The folder will be added to the Bookmark Bar, but can be moved.
 
 ## Versions
+v1.3.0
+- Added "Delete" button next to config row(s) on options page
+
 v1.2.0
-- Added possibility to disable JavaScript injection.
+- Added possibility to disable JavaScript injection
 
 v1.1.1
-- Added cooldown time for synchronisation in order to fix a bug where bookmark(lets) were added multiple times.
+- Added cooldown time for synchronisation in order to fix a bug where bookmark(lets) were added multiple times
 
 v1.1.0:
 - New icon
