@@ -36,6 +36,9 @@ This structure will then be downloaded to your browser when the extension perfor
 The folder will be added to the Bookmark Bar, but can be moved.
 
 ## Versions
+v1.3.1
+- Updated code to update bookmark(lets) instead of first removing and then adding again
+
 v1.3.0
 - Added "Delete" button next to config row(s) on options page
 
@@ -51,4 +54,4 @@ v1.1.0:
 - Support for inject, this means that you can put commonly used functions in a separate file
 
 v1.0.1:
-- Fixed bug where sub folders and their scripts were not created correctly
+- Fixed bug where sub folders and their bookmark(lets) were not created correctly

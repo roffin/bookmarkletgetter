@@ -1,8 +1,8 @@
 /*
- * CONSTANTS-ish
+ * CONSTANTS
  */
 
-var synchronizeCooldownTime = 30000;    // 30 seconds.
+var SYNCHRONIZE_COOLDOWN_TIME = 30000;    // 30 seconds.
 
 
 /*
@@ -33,8 +33,6 @@ function synchronize() {
     if (!startSynchronizeCooldown())
         return;
 
-    clearInjectScripts();   // Remove this call in future version.
-
     chrome.storage.local.get('syncServer', function (result) {
         if (!result.syncServer)
             return;
@@ -53,7 +51,7 @@ function startSynchronizeCooldown() {
     synchronizeCooldownOngoing = true;
     setTimeout( function () {
         synchronizeCooldownOngoing = false;
-    }, synchronizeCooldownTime);
+    }, SYNCHRONIZE_COOLDOWN_TIME);
 
     return true;
 }
@@ -70,8 +68,7 @@ function syncScripts(uri, folderName) {
         var config = JSON.parse(xhr.responseText);
 
         // Set user-specified folder name if given.
-        if (folderName)
-            config.folderName = folderName;
+        config.folderName = folderName || config.folderName;
 
         // Check that folder name exists (either from file or options page).
         if (!config.folderName) {
@@ -79,8 +76,8 @@ function syncScripts(uri, folderName) {
             return;
         }
 
-        updateBookmarklets(config);
-        updateInjectScripts(uri, config);
+        syncBookmarkletsAndBookmarks(config);
+        syncInjectionScripts(uri, config);
     };
     
     try {
@@ -91,59 +88,36 @@ function syncScripts(uri, folderName) {
     }
 }
 
-function updateBookmarklets(config) {
+function syncBookmarkletsAndBookmarks(config) {
     chrome.bookmarks.getTree( function (tree) {
         var bookmarkTree   = tree[0];
         var uriBase        = config.uriBase;
         var scripts        = config.scripts;
         var folderName     = config.folderName;
         var bookmarksBarId = '1';
-        var folderId       = undefined;
 
-        // Create folder if it doesn't exist.
         if (!bookmarkFolderExists(folderName, bookmarkTree)) {
             chrome.bookmarks.create({
                 'parentId': bookmarksBarId,
                 'title'   : folderName
-            }, function (result) {
-                folderId = result.id;
             });
         }
 
         chrome.bookmarks.getTree( function (tree) {
             tree = tree[0];
 
-            if (!folderId)
-                folderId = getFolderId(folderName, tree);
+            var folderId = getFolderId(folderName, tree);
+            var currentBookmarkletsIdMap = getCurrentBookmarkletsIdMap(tree, folderId);
+            
+            addAndUpdateBookmarkletsAndBookmarks(
+                scripts,
+                folderId,
+                uriBase,
+                currentBookmarkletsIdMap
+            );
 
-            // Remove old. Add new.
-            removeBookmarksInFolderId(folderId, function () {
-                addBookmarklets(scripts, folderId, uriBase);
-            });
+            removeBookmarkletsAndBookmarks(scripts, currentBookmarkletsIdMap);
         });
-    });
-}
-
-function removeBookmarksInFolderId(folderId, doAfter) {
-    if (typeof(folderId) != 'string')
-        return;
-
-    chrome.bookmarks.getSubTree(folderId, function (nodes) {
-        if (nodes.length != 1)
-            return;
-        
-        var folderNode = nodes[0];
-        if (folderNode.children && folderNode.children.length) {
-            for (var i=0; i<folderNode.children.length; i++) {
-                var node = folderNode.children[i];
-                if (node.children) {
-                    chrome.bookmarks.removeTree(node.id);
-                } else {
-                    chrome.bookmarks.remove(node.id);
-                }
-            }
-        }
-        doAfter();
     });
 }
 
@@ -169,26 +143,68 @@ function getFolderId(folderName, bookmarkTree) {
     return -1;
 }
 
-function addBookmarklets(scripts, parentId, uriBase) {
+function getCurrentBookmarkletsIdMap(tree, folderId) {
+    var bookmarkletsTree = getSubTree(folderId, tree);
+    var currentBookmarkletsIdMap = {};
+    generateCurrentBookmarkletsIdMap(bookmarkletsTree, currentBookmarkletsIdMap);
+    
+    return currentBookmarkletsIdMap;
+}
+
+function getSubTree(id, tree) {
+    // Folder...
+    if (tree.children) {
+        if (tree.id == id)
+            return tree;
+        
+        for (var i = 0; i < tree.children.length; i++) {
+            var subTree = getSubTree(id, tree.children[i]);
+            if (subTree != -1)
+                return subTree;
+        }
+    }
+
+    // Bookmark...
+    return -1;
+}
+
+function generateCurrentBookmarkletsIdMap(tree, bookmarkletsIdMap, base='') {
+    if (tree.children && tree.children.length) {
+        bookmarkletsIdMap[base + '/'] = tree.id;
+        for (var i=0; i<tree.children.length; i++) {
+            generateCurrentBookmarkletsIdMap(
+                tree.children[i],
+                bookmarkletsIdMap,
+                base + '/' + tree.children[i].title
+            );
+        }
+    } else if (tree.children) {
+        bookmarkletsIdMap[base + '/'] = tree.id;
+    } else {
+        bookmarkletsIdMap[base] = tree.id;
+    }
+}
+
+function addAndUpdateBookmarkletsAndBookmarks(scripts, parentId, uriBase, currentBookmarkletsIdMap, parentFolder='/') {
     var responseData = {};  // This is filled with data later in this function.
 
-    var actuallyAddBookmarklets = function () {
+    var actuallyUpdateBookmarkletsAndBookmarks = function () {
         for (var i=0; i<scripts.length; i++) {
             var scriptObj = scripts[i];
             
             // Bookmarklet...
             if (scriptObj.scriptName && scriptObj.scriptFile) {
-                handleBookmarklet(parentId, scriptObj.scriptName, responseData[i], i, uriBase);
+                handleBookmarklet(parentId, scriptObj.scriptName, responseData[i], i, uriBase, currentBookmarkletsIdMap, parentFolder);
             }
 
             // Bookmark...
             else if (scriptObj.bookmarkName && scriptObj.bookmarkAddress) {
-                handleBookmark(parentId, scriptObj.bookmarkName, scriptObj.bookmarkAddress, i);
+                handleBookmark(parentId, scriptObj.bookmarkName, scriptObj.bookmarkAddress, i, currentBookmarkletsIdMap, parentFolder);
             }
 
             // Sub folder...
             else if (scriptObj.folderName && scriptObj.scripts) {
-                handleSubFolder(parentId, scriptObj.folderName, scriptObj.scripts, uriBase);
+                handleSubFolder(parentId, scriptObj.folderName, scriptObj.scripts, i, uriBase, currentBookmarkletsIdMap, parentFolder);
             }
         }
     };
@@ -199,7 +215,7 @@ function addBookmarklets(scripts, parentId, uriBase) {
     // Do HTTP requests.
     var expectedResponses = Object.keys(requestUrls).length;
     if (expectedResponses == 0) {
-        actuallyAddBookmarklets();
+        actuallyUpdateBookmarkletsAndBookmarks();
         return;
     }
 
@@ -217,7 +233,7 @@ function addBookmarklets(scripts, parentId, uriBase) {
                 }
 
                 if (expectedResponses == Object.keys(responseData).length)
-                    actuallyAddBookmarklets();
+                    actuallyUpdateBookmarkletsAndBookmarks();
             };
 
             try {
@@ -228,9 +244,97 @@ function addBookmarklets(scripts, parentId, uriBase) {
                 expectedResponses--;
 
                 if (expectedResponses == Object.keys(responseData).length)
-                    actuallyAddBookmarklets();
+                    actuallyUpdateBookmarkletsAndBookmarks();
             }
         })(i);
+    }
+}
+
+function handleBookmarklet(parentId, scriptName, script, index, uriBase, currentBookmarkletsIdMap, parentFolder) {
+    var bookmarkletExists = parentFolder+scriptName in currentBookmarkletsIdMap;
+    if (bookmarkletExists) {
+        chrome.bookmarks.update(
+            currentBookmarkletsIdMap[parentFolder+scriptName],
+            {
+                url: 'javascript:' + script
+            }
+        );
+        chrome.bookmarks.move(
+            currentBookmarkletsIdMap[parentFolder+scriptName],
+            {
+                parentId: parentId,
+                index: index
+            }
+        );
+    } else {
+        chrome.bookmarks.create({
+            'parentId': parentId,
+            'title'   : scriptName,
+            'index'   : index,
+            'url'     : 'javascript:' + script
+        });
+    }
+}
+
+function handleBookmark(parentId, bookmarkName, bookmarkAddress, index, currentBookmarkletsIdMap, parentFolder) {
+    var bookmarkExists = parentFolder+bookmarkName in currentBookmarkletsIdMap;
+    if (bookmarkExists) {
+        chrome.bookmarks.update(
+            currentBookmarkletsIdMap[parentFolder+bookmarkName],
+            {
+                url: bookmarkAddress
+            }
+        );
+        chrome.bookmarks.move(
+            currentBookmarkletsIdMap[parentFolder+bookmarkName],
+            {
+                parentId: parentId,
+                index: index
+            }
+        );
+    } else {
+        chrome.bookmarks.create({
+            'parentId': parentId,
+            'title'   : bookmarkName,
+            'url'     : bookmarkAddress,
+            'index'   : index
+        });
+    }
+}
+
+function handleSubFolder(parentId, folderName, subFolderScripts, index, uriBase, currentBookmarkletsIdMap, parentFolder) {
+    var folderExists = parentFolder+folderName+'/' in currentBookmarkletsIdMap;
+
+    if (folderExists) {
+        chrome.bookmarks.move(
+            currentBookmarkletsIdMap[parentFolder+folderName+'/'],
+            {
+                parentId: parentId,
+                index: index
+            }
+        );
+
+        addAndUpdateBookmarkletsAndBookmarks(
+            subFolderScripts,
+            currentBookmarkletsIdMap[parentFolder+folderName+'/'],
+            uriBase,
+            currentBookmarkletsIdMap,
+            parentFolder+folderName+'/'
+        );
+    } else {
+        var onCreateDone = function (result) {
+            addAndUpdateBookmarkletsAndBookmarks(
+                subFolderScripts,
+                result.id,
+                uriBase,
+                currentBookmarkletsIdMap,
+                parentFolder+folderName+'/'
+            );
+        };
+        chrome.bookmarks.create({
+            'parentId': parentId,
+            'title'   : folderName
+        }, onCreateDone);
     }
 }
 
@@ -246,35 +350,63 @@ function getHttpRequestUrls(scripts) {
     return requestUrls;
 }
 
-function handleBookmarklet(parentId, scriptName, script, index, uriBase) {
-    chrome.bookmarks.create({
-        'parentId': parentId,
-        'title'   : scriptName,
-        'index'   : index,
-        'url'     : 'javascript:' + script
-    });
+function removeBookmarkletsAndBookmarks(scripts, currentBookmarkletsIdMap) {
+    var scriptsAsPathList = generateScriptPathList(scripts);
+    var bookmarkPathsToRemove =
+        createListOfBookmarkPathsToRemove(currentBookmarkletsIdMap, scriptsAsPathList).sort();
+    var idsToRemove = convertPathListToIdList(bookmarkPathsToRemove, currentBookmarkletsIdMap);
+    removeBookmarkIdsByPop(idsToRemove);
 }
 
-function handleBookmark(parentId, bookmarkName, bookmarkAddress, index) {
-    chrome.bookmarks.create({
-        'parentId': parentId,
-        'title'   : bookmarkName,
-        'url'     : bookmarkAddress,
-        'index'   : index
-    });
+function generateScriptPathList(scripts, parentFolder='/') {
+    var scriptList = parentFolder == '/' ? [parentFolder] : [];
+
+    for (var index in scripts) {
+        var scriptObj = scripts[index];
+        if (scriptObj.scriptName && scriptObj.scriptFile) {
+            scriptList.push(parentFolder + scriptObj.scriptName);
+        }
+        else if (scriptObj.bookmarkName && scriptObj.bookmarkAddress) {
+            scriptList.push(parentFolder + scriptObj.bookmarkName);
+        }
+        else if (scriptObj.folderName && scriptObj.scripts) {
+            scriptList.push(parentFolder + scriptObj.folderName + '/');
+            scriptList = scriptList.concat(
+                generateScriptPathList(
+                    scriptObj.scripts,
+                    parentFolder + scriptObj.folderName + '/'
+                )
+            );
+        }
+    }
+
+    return scriptList;
 }
 
-function handleSubFolder(parentId, folderName, subFolderScripts, uriBase) {
-    var onCreateDone = function (result) {
-        addBookmarklets(subFolderScripts, result.id, uriBase);
-    };
-    chrome.bookmarks.create({
-        'parentId': parentId,
-        'title'   : folderName
-    }, onCreateDone);
+function createListOfBookmarkPathsToRemove(bookmarkletsIdMap, scriptList) {
+    var toRemove = [];
+    for (scriptName in bookmarkletsIdMap) {
+        if (scriptList.indexOf(scriptName) == -1)
+            toRemove.push(scriptName);
+    }
+    return toRemove;
 }
 
-function updateInjectScripts(configUri, config) {
+function convertPathListToIdList(bookmarkPaths, currentBookmarkletsIdMap) {
+    var ids = [];
+    for (index in bookmarkPaths)
+        ids.push(currentBookmarkletsIdMap[bookmarkPaths[index]]);
+    return ids;
+}
+
+function removeBookmarkIdsByPop(idsToRemove, currentBookmarkletsIdMap) {
+    while (idsToRemove.length > 0) {
+        var id = idsToRemove.pop();
+        chrome.bookmarks.remove(id);
+    }
+}
+
+function syncInjectionScripts(configUri, config) {
     if (!configUri)
         return;
 
@@ -371,25 +503,4 @@ function executeNextJob() {
 
 function statusIsOk(xhr) {
     return xhr.readyState == 4 && Math.floor(xhr.status/100) == 2;
-}
-
-/**
- * Depricated. Remove in future version...
- */
-function clearInjectScripts() {
-    chrome.storage.local.get('injectScriptsFolders', function (result) {
-        if (result.injectScriptsFolders) {
-            for (var i=0; i<result.injectScriptsFolders.length; i++) {
-                removeInjectScriptsFolder(result.injectScriptsFolders[i]);
-            }
-            chrome.storage.local.remove('injectScriptsFolders');
-        }
-    });
-}
-
-/**
- * Depricated. Remove in future version...
- */
-function removeInjectScriptsFolder(folderName) {
-    chrome.storage.local.remove('injectScripts' + folderName);
 }
