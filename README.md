@@ -36,6 +36,9 @@ This structure will then be downloaded to your browser when the extension perfor
 The folder will be added to the Bookmark Bar, but can be moved.
 
 ## Versions
+v1.4.0
+- Automatic sync/update every 4th hour
+
 v1.3.1
 - Updated code to update bookmark(lets) instead of first removing and then adding again
 

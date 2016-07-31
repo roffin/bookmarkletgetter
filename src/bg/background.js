@@ -2,8 +2,9 @@
  * CONSTANTS
  */
 
-var SYNCHRONIZE_COOLDOWN_TIME = 30000;    // 30 seconds.
-
+var SYNCHRONIZE_COOLDOWN_TIME = 30000;  // 30 seconds.
+var PERIODIC_ALARM_TIME = 240;          // Every 4th hour.
+var PERIODIC_SYNC_ALARM_NAME = 'sync_bookmarklets';
 
 /*
  * INIT: Register synchronization triggers.
@@ -24,6 +25,8 @@ chrome.browserAction.onClicked.addListener(function (tab) {
     synchronize();
 });
 
+// Sync every 4th hour.
+registerPeriodicSync();
 
 /*
  * FUNCTIONS: Functions needed for synchronization.
@@ -499,6 +502,18 @@ function executeNextJob() {
 
     var job = storeJobs.shift();
     job(executeNextJob);
+}
+
+function registerPeriodicSync() {
+    chrome.alarms.create(PERIODIC_SYNC_ALARM_NAME, {
+        delayInMinutes: PERIODIC_ALARM_TIME,
+        periodInMinutes: PERIODIC_ALARM_TIME
+    });
+
+    chrome.alarms.onAlarm.addListener(function (alarm) {
+        if (alarm.name == PERIODIC_SYNC_ALARM_NAME)
+            synchronize();
+    });
 }
 
 function statusIsOk(xhr) {
